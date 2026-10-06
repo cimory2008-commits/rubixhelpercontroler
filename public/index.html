@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow">
+<meta name="theme-color" content="#070709">
+<title>Web Controller - 4MANKK DEV</title>
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:ital,wght@0,500;0,700;1,700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="admin.css">
+</head>
+<body>
+<main>
+  <header class="top"><img src="logo.png" alt="4MANKK DEV"><div class="r"><span class="cap" id="who">Web Controller</span><button class="bt hide" id="out">Keluar</button></div></header>
+
+  <section id="login">
+    <div class="cap">Khusus admin</div>
+    <h1>Web<br><span>Controller.</span></h1>
+    <div class="fld"><label for="au">Username admin</label><input id="au" autocomplete="username" autocapitalize="none"></div>
+    <div class="fld"><label for="ap">Password</label><input id="ap" type="password" autocomplete="current-password"></div>
+    <div class="err" id="le"></div>
+    <button class="bt" id="lg" style="width:100%">Masuk</button>
+  </section>
+
+  <section id="dash" class="hide">
+    <div class="strip4" id="st"></div>
+    <div class="tools">
+      <input id="q" placeholder="Cari username atau Gmail..." autocomplete="off">
+      <select id="f"><option value="all">Semua</option><option value="aktif">Aktif</option><option value="banned">Dibanned</option></select>
+      <button class="bt" id="rf">Muat ulang</button>
+    </div>
+    <div id="list"></div>
+  </section>
+</main>
+<div id="md" class="md hide"><div class="box" id="mb"></div></div>
+<div id="tt" class="toast hide"></div>
+<script src="admin.js"></script>
+</body>
+</html>
