@@ -14,17 +14,21 @@ Aturan:
 const PRESETS = {
   anthropic: { kind: "anthropic", url: "https://api.anthropic.com/v1/messages", model: "claude-haiku-4-5-20251001" },
   gemini: { kind: "openai", url: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", model: "gemini-2.5-flash-lite" },
-  groq: { kind: "openai", url: "https://api.groq.com/openai/v1/chat/completions", model: "llama-3.3-70b-versatile" },
+  groq: { kind: "openai", url: "https://api.groq.com/openai/v1/chat/completions", model: "llama-3.1-8b-instant" },
   custom: { kind: "openai", url: "", model: "" },
 };
+
 function provider() {
   const name = (process.env.AI_PROVIDER || "anthropic").toLowerCase(), p = PRESETS[name];
   if (!p) throw new HttpError(500, "AI_PROVIDER tidak dikenal. Pilih: anthropic, gemini, groq, atau custom.");
   const apiKey = process.env.AI_API_KEY || process.env.ANTHROPIC_API_KEY;
   if (!apiKey) throw new HttpError(500, "AI belum diatur di server (AI_API_KEY kosong).");
   let url = process.env.AI_URL || process.env.ANTHROPIC_URL || p.url;
-  if (name === "custom" && !process.env.AI_URL) url = (process.env.AI_BASE_URL || "").replace(/\/+$/, "") + "/chat/completions";
+  if (name === "custom" && !process.env.AI_URL) url = (process.env.AI_BASE_URL || "").replace(/\/+\$/, "") + "/chat/completions";
+  
+  // PERBAIKAN: Utamakan AI_MODEL dari Environment Variable Vercel, jika kosong baru pakai preset bawaan
   const model = process.env.AI_MODEL || p.model;
+  
   if (name === "custom" && (!process.env.AI_BASE_URL && !process.env.AI_URL)) throw new HttpError(500, "Provider custom butuh AI_BASE_URL.");
   if (!model) throw new HttpError(500, "Provider custom butuh AI_MODEL.");
   return { kind: p.kind, url, model, apiKey };
