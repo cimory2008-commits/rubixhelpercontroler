@@ -10,10 +10,9 @@ Aturan:
 - Tulis notasi dengan huruf besar (R, U, F', B2) dan jelaskan artinya bila penanya pemula.
 - Kalau tidak yakin, katakan terus terang.`;
 
-// penyedia AI: pilih lewat AI_PROVIDER. "openai" = format OpenAI-compatible (dipakai Gemini, Groq, OpenRouter, dll)
 const PRESETS = {
-  anthropic: { kind: "anthropic", url: "https://api.anthropic.com/v1/messages", model: "claude-haiku-4-5-20251001" },
-  gemini: { kind: "openai", url: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", model: "gemini-2.5-flash-lite" },
+  anthropic: { kind: "anthropic", url: "https://anthropic.com", model: "claude-haiku-4-5-20251001" },
+  gemini: { kind: "openai", url: "https://googleapis.com", model: "gemini-2.5-flash-lite" },
   groq: { kind: "openai", url: "https://api.groq.com/openai/v1/chat/completions", model: "llama-3.1-8b-instant" },
   custom: { kind: "openai", url: "", model: "" },
 };
@@ -26,7 +25,6 @@ function provider() {
   let url = process.env.AI_URL || process.env.ANTHROPIC_URL || p.url;
   if (name === "custom" && !process.env.AI_URL) url = (process.env.AI_BASE_URL || "").replace(/\/+\$/, "") + "/chat/completions";
   
-  // PERBAIKAN: Utamakan AI_MODEL dari Environment Variable Vercel, jika kosong baru pakai preset bawaan
   const model = process.env.AI_MODEL || p.model;
   
   if (name === "custom" && (!process.env.AI_BASE_URL && !process.env.AI_URL)) throw new HttpError(500, "Provider custom butuh AI_BASE_URL.");
@@ -45,15 +43,19 @@ async function ask(P, system, msgs) {
       ? { model: P.model, max_tokens: 500, system, messages: msgs }
       : { model: P.model, max_tokens: 500, messages: [{ role: "system", content: system }, ...msgs] }),
   });
+  
   const d = await r.json().catch(() => ({}));
+  
+  // PERBAIKAN LOGIKA EKSTRAKSI TEKS OPENAI / GROQ COMPATIBLE
   const text = anth
     ? (d.content || []).filter((c) => c.type === "text").map((c) => c.text).join("\n")
     : (d.choices && d.choices[0] && d.choices[0].message && d.choices[0].message.content) || "";
+    
   return { r, d, text: String(text).trim() };
 }
 
 export default route(["POST"], async (req) => {
-  const u = await requireUser(req);            // wajib login dan tidak dibanned
+  const u = await requireUser(req);            
   const P = provider();
   const b = getBody(req);
   let msgs = (Array.isArray(b.messages) ? b.messages : [])
@@ -75,10 +77,18 @@ export default route(["POST"], async (req) => {
   try { out = await ask(P, system, msgs); }
   catch { await refund(); throw new HttpError(502, "Tidak bisa menghubungi AI."); }
   if (out.r.status === 429) { await refund(); throw new HttpError(429, "AI sedang ramai (batas gratis penyedia tercapai). Coba lagi sebentar."); }
+  
   if (!out.r.ok) {
-    console.error("AI error", out.r.status, JSON.stringify(out.d).slice(0, 300));   // terlihat di Vercel > Logs
+    console.error("AI error", out.r.status, JSON.stringify(out.d).slice(0, 300));   
     await refund(); throw new HttpError(502, "AI sedang bermasalah. Coba lagi nanti.");
   }
+  
+  // Tambahan validasi jika server mengembalikan sukses 200 tetapi teksnya kosong
+  if (!out.text) {
+    console.error("AI return data structure error:", JSON.stringify(out.d).slice(0, 300));
+    await refund(); throw new HttpError(502, "Format data AI bermasalah. Coba lagi nanti.");
+  }
+
   await db.incr("ai:total:" + k);
-  return { reply: out.text || "Maaf, aku belum bisa menjawab itu.", left: Math.max(0, lim - n) };
+  return { reply: out.text, left: Math.max(0, lim - n) };
 });
