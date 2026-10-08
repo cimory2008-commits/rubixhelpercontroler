@@ -10,9 +10,47 @@ Aturan:
 - Tulis notasi dengan huruf besar (R, U, F', B2) dan jelaskan artinya bila penanya pemula.
 - Kalau tidak yakin, katakan terus terang.`;
 
+// penyedia AI: pilih lewat AI_PROVIDER. "openai" = format OpenAI-compatible (dipakai Gemini, Groq, OpenRouter, dll)
+const PRESETS = {
+  anthropic: { kind: "anthropic", url: "https://api.anthropic.com/v1/messages", model: "claude-haiku-4-5-20251001" },
+  gemini: { kind: "openai", url: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", model: "gemini-2.5-flash-lite" },
+  groq: { kind: "openai", url: "https://api.groq.com/openai/v1/chat/completions", model: "llama-3.3-70b-versatile" },
+  custom: { kind: "openai", url: "", model: "" },
+};
+function provider() {
+  const name = (process.env.AI_PROVIDER || "anthropic").toLowerCase(), p = PRESETS[name];
+  if (!p) throw new HttpError(500, "AI_PROVIDER tidak dikenal. Pilih: anthropic, gemini, groq, atau custom.");
+  const apiKey = process.env.AI_API_KEY || process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) throw new HttpError(500, "AI belum diatur di server (AI_API_KEY kosong).");
+  let url = process.env.AI_URL || process.env.ANTHROPIC_URL || p.url;
+  if (name === "custom" && !process.env.AI_URL) url = (process.env.AI_BASE_URL || "").replace(/\/+$/, "") + "/chat/completions";
+  const model = process.env.AI_MODEL || p.model;
+  if (name === "custom" && (!process.env.AI_BASE_URL && !process.env.AI_URL)) throw new HttpError(500, "Provider custom butuh AI_BASE_URL.");
+  if (!model) throw new HttpError(500, "Provider custom butuh AI_MODEL.");
+  return { kind: p.kind, url, model, apiKey };
+}
+
+async function ask(P, system, msgs) {
+  const anth = P.kind === "anthropic";
+  const r = await fetch(P.url, {
+    method: "POST",
+    headers: anth
+      ? { "content-type": "application/json", "x-api-key": P.apiKey, "anthropic-version": "2023-06-01" }
+      : { "content-type": "application/json", authorization: "Bearer " + P.apiKey },
+    body: JSON.stringify(anth
+      ? { model: P.model, max_tokens: 500, system, messages: msgs }
+      : { model: P.model, max_tokens: 500, messages: [{ role: "system", content: system }, ...msgs] }),
+  });
+  const d = await r.json().catch(() => ({}));
+  const text = anth
+    ? (d.content || []).filter((c) => c.type === "text").map((c) => c.text).join("\n")
+    : (d.choices && d.choices[0] && d.choices[0].message && d.choices[0].message.content) || "";
+  return { r, d, text: String(text).trim() };
+}
+
 export default route(["POST"], async (req) => {
   const u = await requireUser(req);            // wajib login dan tidak dibanned
-  if (!process.env.ANTHROPIC_API_KEY) throw new HttpError(500, "AI belum diatur di server (ANTHROPIC_API_KEY kosong).");
+  const P = provider();
   const b = getBody(req);
   let msgs = (Array.isArray(b.messages) ? b.messages : [])
     .filter((m) => m && (m.role === "user" || m.role === "assistant") && typeof m.content === "string" && m.content.trim())
@@ -29,17 +67,14 @@ export default route(["POST"], async (req) => {
   if (n > lim) throw new HttpError(429, `Batas ${lim} pertanyaan AI hari ini sudah habis. Coba lagi besok, atau pakai mode kamus.`);
   const refund = () => db.decr(qk).catch(() => {});
 
-  let r, d;
-  try {
-    r = await fetch(process.env.ANTHROPIC_URL || "https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: { "content-type": "application/json", "x-api-key": process.env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01" },
-      body: JSON.stringify({ model: process.env.AI_MODEL || "claude-haiku-4-5-20251001", max_tokens: 500, system, messages: msgs }),
-    });
-    d = await r.json();
-  } catch { await refund(); throw new HttpError(502, "Tidak bisa menghubungi AI."); }
-  if (!r.ok) { await refund(); throw new HttpError(502, "AI sedang bermasalah. Coba lagi nanti."); }
+  let out;
+  try { out = await ask(P, system, msgs); }
+  catch { await refund(); throw new HttpError(502, "Tidak bisa menghubungi AI."); }
+  if (out.r.status === 429) { await refund(); throw new HttpError(429, "AI sedang ramai (batas gratis penyedia tercapai). Coba lagi sebentar."); }
+  if (!out.r.ok) {
+    console.error("AI error", out.r.status, JSON.stringify(out.d).slice(0, 300));   // terlihat di Vercel > Logs
+    await refund(); throw new HttpError(502, "AI sedang bermasalah. Coba lagi nanti.");
+  }
   await db.incr("ai:total:" + k);
-  const text = (d.content || []).filter((c) => c.type === "text").map((c) => c.text).join("\n").trim();
-  return { reply: text || "Maaf, aku belum bisa menjawab itu.", left: Math.max(0, lim - n) };
+  return { reply: out.text || "Maaf, aku belum bisa menjawab itu.", left: Math.max(0, lim - n) };
 });
